@@ -1,0 +1,107 @@
+{
+ "schema_version": "ATIF-v1.7",
+ "agent": {
+  "name": "swe_agent",
+  "version": "1.0"
+ },
+ "steps": [
+  {
+   "step_id": 1,
+   "source": "user",
+   "message": "Fix engine stop",
+   "extra": {
+    "event_type": "task_prompt"
+   }
+  },
+  {
+   "step_id": 2,
+   "source": "agent",
+   "tool_calls": [
+    {
+     "tool_call_id": "call_2",
+     "function_name": "run_skill_script",
+     "arguments": {
+      "skill_name": "mini-palace",
+      "file_path": "scripts/entrypoint.py",
+      "args": {
+       "action": "locate",
+       "text": "Fix engine stop"
+      }
+     },
+     "extra": {
+      "elapsed_s": 2.0
+     }
+    }
+   ],
+   "observation": {
+    "content": "{\"skill_name\": \"mini-palace\", \"file_path\": \"scripts/entrypoint.py\", \"stdout\": \"{\\\"ok\\\":true,\\\"decision\\\":\\\"ESCALATE\\\",\\\"statement\\\":\\\"link_only\\\",\\\"kind\\\":\\\"bug\\\",\\\"items\\\":[{\\\"file\\\":\\\"src/demo/core.py\\\",\\\"score\\\":9.1,\\\"why\\\":{\\\"sym\\\":3.0,\\\"path\\\":2.0,\\\"exact\\\":0.0,\\\"habit\\\":4.1},\\\"symbols\\\":[\\\"Engine.run:5\\\"]},{\\\"file\\\":\\\"src/demo/cache.py\\\",\\\"score\\\":3.2,\\\"why\\\":{\\\"sym\\\":1.0,\\\"path\\\":0,\\\"exact\\\":0,\\\"habit\\\":2.2},\\\"symbols\\\":[]}],\\\"discarded\\\":0,\\\"habits\\\":[\\\"Pa1b2c3d4\\\",\\\"Pe5f60718\\\"],\\\"next\\\":[\\\"outline --file src/demo/core.py\\\"],\\\"ms\\\":42}\", \"stderr\": \"\", \"status\": \"success\"}",
+    "extra": {
+     "tool_name": "run_skill_script"
+    }
+   },
+   "llm_call_count": 1
+  },
+  {
+   "step_id": 3,
+   "source": "agent",
+   "tool_calls": [
+    {
+     "tool_call_id": "call_3",
+     "function_name": "read_file",
+     "arguments": {
+      "path": "src/demo/core.py",
+      "start": 1,
+      "end": 40
+     },
+     "extra": {
+      "elapsed_s": 3.0
+     }
+    }
+   ],
+   "observation": {
+    "content": "{}"
+   },
+   "llm_call_count": 1
+  },
+  {
+   "step_id": 4,
+   "source": "agent",
+   "tool_calls": [
+    {
+     "tool_call_id": "call_4",
+     "function_name": "edit_file",
+     "arguments": {
+      "path": "src/demo/core.py",
+      "old": "x",
+      "new": "y"
+     },
+     "extra": {
+      "elapsed_s": 4.0
+     }
+    }
+   ],
+   "observation": {
+    "content": "{}"
+   },
+   "llm_call_count": 1
+  },
+  {
+   "step_id": 5,
+   "source": "agent",
+   "tool_calls": [
+    {
+     "tool_call_id": "call_5",
+     "function_name": "submit_patch",
+     "arguments": {},
+     "extra": {
+      "elapsed_s": 5.0
+     }
+    }
+   ],
+   "observation": {
+    "content": "{}"
+   },
+   "llm_call_count": 1
+  }
+ ]
+}

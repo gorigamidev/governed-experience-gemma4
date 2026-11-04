@@ -1,0 +1,8 @@
+diff --git a/src/demo/core.py b/src/demo/core.py
+--- a/src/demo/core.py
++++ b/src/demo/core.py
+@@ -4,3 +4,3 @@ class Engine:
+     def run(self):
+-        return self.step()
++        return self.step(safe=True)
+     def stop(self):

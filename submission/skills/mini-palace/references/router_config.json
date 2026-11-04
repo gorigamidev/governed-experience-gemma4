@@ -1,0 +1,7 @@
+{
+ "resolve_ratio": 3.0,
+ "resolve_min_score": 2.0,
+ "discard_ratio": 0.0,
+ "max_items": 5,
+ "pattern_weight": 3.0
+}

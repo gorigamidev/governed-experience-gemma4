@@ -1,0 +1,16 @@
+[project]
+name = "lab"
+version = "0.1.0"
+description = "Offline analysis plane for the Gemma 4 Developer Agent challenge"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+store = ["linaldb==0.1.22"]  # offline plane (lab/store, lab/consolidate); Apache-2.0 from 0.1.20
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

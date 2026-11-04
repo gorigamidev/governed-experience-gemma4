@@ -1,0 +1,21 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"  # same as the evaluation sandbox image (python:3.13-slim)
+      - name: Install LINALDB (offline store tests)
+        run: python -m pip install "linaldb==0.1.22"  # Apache-2.0 from 0.1.20; same pin as lab/pyproject.toml [store]
+      - name: Run tests
+        env:
+          PYTHONPATH: lab/src
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m unittest discover -s lab/tests -v

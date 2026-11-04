@@ -1,0 +1,17 @@
+# Competition Data must not be redistributed (rules 2.4.b); regenerate locally with the Kaggle CLI.
+data/
+build/
+lab/.venv/
+.backup/
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+.env
+# Local agent guides (kept out of the repo on purpose)
+AGENTS.md
+CLAUDE.md
+
+# Third-party papers: kept locally, indexed in paper/sources/README.md
+paper/sources/*.pdf
+lab/.venv-train/

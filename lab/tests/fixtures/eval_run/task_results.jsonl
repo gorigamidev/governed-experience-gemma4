@@ -1,0 +1,2 @@
+{"instance_id": "demo_1", "repo": "org/demo", "resolved": true, "agent_patch_size": 180, "test_exit_code": 0, "duration_seconds": 141.5, "error": null, "tool_calls": 7}
+{"instance_id": "demo_2", "repo": "org/demo", "resolved": false, "agent_patch_size": 0, "test_exit_code": 1, "duration_seconds": 240.0, "error": "agent timed out", "tool_calls": 12}

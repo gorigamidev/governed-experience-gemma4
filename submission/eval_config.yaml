@@ -1,0 +1,9 @@
+# The scorer reads only these four fields and runs ~120 hidden tasks sequentially; with no values there is
+# no limit, and a run past the 12 h cap currently errors as a whole (forum 743063, organizers).
+# Worst case: 120 tasks x (4 min agent + ~1 min sandbox setup) = 10 h, leaving ~2 h of margin.
+evaluation:
+  max_time_minutes: 4
+  # Phase 2 runs the official pytest with this same timeout (swegemma harness/verification.py).
+  timeout_seconds: 300
+  max_tool_calls: 60
+  max_turns: 120

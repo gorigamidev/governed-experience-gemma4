@@ -1,0 +1,11 @@
+Governed Experience for an Offline Gemma 4 Coding Agent
+Copyright 2026 Gorigami S.A.S.
+
+This product includes third-party agent bundles from public Kaggle notebooks (Apache License 2.0),
+kept byte-identical in external/:
+- external/budget-fit/: "Gemma 4 Agent: Budget-Fit Single Agent", Wilmer E. Henao
+  (https://www.kaggle.com/code/verracodeguacas/gemma-4-agent-budget-fit-single-agent)
+- external/h24/: "Gemma 4 baseline LB 0.24", honghanhhh
+  (https://www.kaggle.com/code/honghanhhh/gemma-4-baseline-lb-0-24)
+- external/top-bundle/: "Gemma EDA baseline for a start (LB top-1)", Roman Rozen
+  (https://www.kaggle.com/code/romanrozen/gemma-eda-baseline-for-a-start-lb-top-1)

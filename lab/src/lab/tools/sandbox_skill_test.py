@@ -32,8 +32,8 @@ def sh(*args: str, check: bool = True, input_text: str | None = None) -> subproc
     return res
 
 
-def skill_files_from_zip(zip_path: Path) -> dict[str, str]:
-    prefix = "skills/mini-palace/"
+def skill_files_from_zip(zip_path: Path, skill: str = "mini-palace") -> dict[str, str]:
+    prefix = f"skills/{skill}/"
     files = {}
     with zipfile.ZipFile(zip_path) as zf:
         for name in zf.namelist():
@@ -58,8 +58,8 @@ class Sandbox:
         self.exec("git config --global --add safe.directory /workspace && git add -A && "
                   "git -c user.email=agent@eval -c user.name=Agent commit -qm baseline --allow-empty")
 
-    def run_skill(self, files: dict[str, str], args: dict) -> tuple[dict | None, str, float]:
-        code = build_wrapper(files, "entrypoint.py", args)
+    def run_skill(self, files: dict[str, str], args: dict, script: str = "entrypoint.py") -> tuple[dict | None, str, float]:
+        code = build_wrapper(files, script, args)
         target = f".adk_exec_{uuid.uuid4().hex[:8]}.py"
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
             f.write(code)

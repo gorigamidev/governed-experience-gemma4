@@ -5,8 +5,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "lab/src"))
 
-from lab.analysis.pool_report import (apply_ed_rules, apply_gov_rules, apply_rules, apply_tb22_rules,  # noqa: E402
+from lab.analysis.pool_report import (apply_ec_rules, apply_ed_rules, apply_gov_rules, apply_rules, apply_sl_rules,  # noqa: E402
+                                      apply_tb22_rules,
                                       apply_tb_rules,
+                                      apply_nt_rules, after_edit_checks,
                                       apply_to_rules, bucket, locator_metrics, replica_noise, trace_metrics)
 
 
@@ -34,7 +36,8 @@ class TraceMetricsTest(unittest.TestCase):
                                                "wrapped": 0, "hangs": 0, "cut_by_timeout": 0,
                                                "max_turn_tokens": 0, "long_turn_seconds": [],
                                                "locator_used": False, "locator_calls": 0, "plan_file": None,
-                                               "charged_calls": 5, "warning_call": None, "rejected_calls": 0})
+                                               "charged_calls": 5, "warning_call": None, "rejected_calls": 0,
+                                               "test_after_edit": False, "exec_after_edit": False})
 
     def test_a_retry_after_another_call_is_not_a_repeat(self):
         a = {"old_string": "x"}
@@ -131,6 +134,53 @@ class TbRulesTest(unittest.TestCase):
         out = apply_tb_rules(s, self.rows(["rich_3521"]))
         self.assertTrue(out[2].startswith("Rule 3 (bf-gov-tb base): NO"))
         self.assertIn("bf-gov-tb: timeouts 1/2", out[3])
+
+
+class NtRulesTest(unittest.TestCase):
+    def test_after_edit_checks(self):
+        t = {"steps": [run("timeout 90 python -m pytest tests/test_x.py"), edit({"old_string": "a"}, True),
+                       run("git diff"), call("submit_patch"), run("timeout 90 python -m pytest tests/test_x.py")]}
+        self.assertEqual(after_edit_checks(t), {"test_after_edit": False, "exec_after_edit": False})
+        t = {"steps": [edit({"old_string": "a"}, True), run("timeout 90 python -c 'import x'"),
+                       edit({"old_string": "b"}, False), run("timeout 90 python -m pytest tests/test_x.py -x -q")]}
+        self.assertEqual(after_edit_checks(t), {"test_after_edit": True, "exec_after_edit": True})
+        self.assertEqual(after_edit_checks({"steps": [run("ls")]}), {"test_after_edit": None, "exec_after_edit": None})
+
+    def rows(self, tests_vr, tests_to=(False,) * 16):
+        def mk(flags):
+            return [{"task": f"t{i}", "test_after_edit": f, "exec_after_edit": f, "first_edit_call": 9, "patch_files": 1}
+                    for i, f in enumerate(flags)]
+        return {"bf-gov-to": mk(tests_to), "bf-gov-to-nt": mk((False,) * 16), "bf-gov-to-nt-vr": mk(tests_vr)}
+
+    def summ(self, to=5, nt=5, vr=5, **kw):
+        base = dict(n=16, verifiable=11, session_timeouts=2, aux=0, edit_by_12=8, call_cap=2, max_turn_tokens=3000)
+        return {"bf-gov-to": arm(**base, R_verifiable=to), "bf-gov-to-nt": arm(**{**base, **kw}, R_verifiable=nt),
+                "bf-gov-to-nt-vr": arm(**base, R_verifiable=vr)}
+
+    def test_bar_is_best_to_session_plus_two(self):
+        out = apply_nt_rules(self.summ(to=5, nt=7), self.rows((False,) * 16))
+        self.assertIn("= 7 of 11", out[0])
+        self.assertTrue(out[1].startswith("Rule 2 (bf-gov-to-nt candidate): YES"))
+        self.assertTrue(out[2].startswith("Rule 3 (vr compliance): NOT MET"))
+        self.assertIn("bf-gov-to-nt gets two public replicas", out[4])
+        out = apply_nt_rules(self.summ(to=6, nt=7), self.rows((False,) * 16))  # this session raises the bar to 8
+        self.assertTrue(out[1].startswith("Rule 2 (bf-gov-to-nt candidate): NO"))
+        self.assertIn("no candidate", out[4])
+
+    def test_vr_needs_compliance_then_the_bar(self):
+        comply = (True,) * 10 + (False,) * 6
+        out = apply_nt_rules(self.summ(vr=8), self.rows(comply))
+        self.assertTrue(out[2].startswith("Rule 3 (vr compliance): MET"))
+        self.assertTrue(out[3].startswith("Rule 4 (bf-gov-to-nt-vr candidate): YES"))
+        self.assertIn("bf-gov-to-nt-vr gets", out[4])
+        out = apply_nt_rules(self.summ(nt=8, session_timeouts=5), self.rows((True,) * 9 + (False,) * 7))
+        self.assertTrue(out[2].startswith("Rule 3 (vr compliance): NOT MET"))  # 56% < 60%
+        self.assertTrue(out[1].startswith("Rule 2 (bf-gov-to-nt candidate): NO"))  # more session timeouts
+
+    def test_validity(self):
+        s = self.summ()
+        s["bf-gov-to-nt"]["infra_errors"] = 2
+        self.assertIn("FAIL", apply_nt_rules(s, self.rows((False,) * 16))[0])
 
 
 class Tb22RulesTest(unittest.TestCase):
@@ -235,3 +285,84 @@ class ToRulesTest(unittest.TestCase):
         self.assertIn("NOT MET", out[1])
         self.assertTrue(out[2].startswith("Rule 3 (bf-gov-to base, GPU only): NO"))
         self.assertTrue(out[3].endswith("bf-gov"))
+
+
+class SlackRulesTest(unittest.TestCase):
+    def rows(self, tb_lost=5, sl_lost=1, warning=22):
+        def run(task, lost):
+            return {"task": task, "resolved": False, "first_edit_call": 12, "charged_calls": 30, "warning_call": warning,
+                    "edits_after_budget": int(lost), "patch_files": 0 if lost else 1}
+        return {"bf-gov-tb": [run(f"t{i}", i < tb_lost) for i in range(8)],
+                "bf-gov-tb-sl": [run(f"t{i}", i < sl_lost) for i in range(8)]}
+
+    def s(self, **sl):
+        base = dict(session_timeouts=1, max_tool_calls=28, edit_by_12=10, call_cap=9)
+        return {"bf-gov-tb": arm(**base), "bf-gov-tb-sl": arm(**{**base, "max_tool_calls": 32, **sl})}
+
+    def test_all_met_is_a_candidate(self):
+        out = apply_sl_rules(self.s(), self.rows(), None)
+        self.assertTrue(out[1].startswith("Rule 2 (structure): MET"))
+        self.assertTrue(out[2].startswith("Rule 3 (mechanism): MET"))
+        self.assertTrue(out[3].startswith("Rule 4 (candidate): YES"))
+
+    def test_a_shifted_deadline_stops_at_the_mechanism(self):
+        out = apply_sl_rules(self.s(R=12), self.rows(sl_lost=3), None)
+        self.assertTrue(out[2].startswith("Rule 3 (mechanism): NOT MET"))
+        self.assertEqual(out[3], "Rule 4 (candidate): NOT READ (rule 3 not met)")
+
+    def test_wrong_warning_call_reads_nothing_else(self):
+        out = apply_sl_rules(self.s(), self.rows(warning=18), None)
+        self.assertIn("NOT MET", out[1])
+        self.assertEqual(out[2], "Rule 3 (mechanism): NOT READ (rule 2 not met)")
+
+    def test_lower_r_is_not_a_candidate(self):
+        out = apply_sl_rules(self.s(R=5), self.rows(), None)
+        self.assertTrue(out[3].startswith("Rule 4 (candidate): NO"))
+
+
+class EarlyEditRulesTest(unittest.TestCase):
+    def rows(self, tb_gap=7, ec_gap=4):
+        def run(task, gap):
+            return {"task": task, "resolved": False, "first_edit_call": 14, "read_to_edit_gap": gap,
+                    "rejected_calls": 0}
+        return {"bf-gov-tb": [run(f"t{i}", tb_gap) for i in range(6)],
+                "bf-gov-tb-ec": [run(f"t{i}", ec_gap) for i in range(6)] + [run("t9", None)]}
+
+    def s(self, **ec):
+        base = dict(session_timeouts=1, edit_by_12=10, late_or_never=7, call_cap=9)
+        return {"bf-gov-tb": arm(**base), "bf-gov-tb-ec": arm(**{**base, **ec})}
+
+    def test_compliance_and_no_worse_is_a_candidate(self):
+        out = apply_ec_rules(self.s(), self.rows(), None)
+        self.assertTrue(out[1].startswith("Rule 2 (compliance): MET"))
+        self.assertTrue(out[2].startswith("Rule 3 (candidate): YES"))
+
+    def test_a_gap_drop_of_one_is_not_compliance(self):
+        out = apply_ec_rules(self.s(R=12), self.rows(ec_gap=6), None)
+        self.assertIn("NOT MET", out[1])
+        self.assertEqual(out[2], "Rule 3 (candidate): NOT READ (rule 2 not met)")
+
+    def test_more_session_timeouts_is_not_a_candidate(self):
+        out = apply_ec_rules(self.s(session_timeouts=2), self.rows(), None)
+        self.assertTrue(out[2].startswith("Rule 3 (candidate): NO"))
+
+    def test_too_few_tasks_reads_nothing(self):
+        out = apply_ec_rules(self.s(n=17), self.rows(), None)
+        self.assertEqual(len(out), 1)
+        self.assertIn("FAIL", out[0])
+
+
+class NoiseFloorRulesTest(unittest.TestCase):
+    """Item 51: the base of the mechanism and compliance rules is the lowest of every `bf-gov-tb` session."""
+
+    def test_sl_mechanism_uses_the_lowest_base_session(self):
+        t = SlackRulesTest()
+        prev = [t.rows(tb_lost=2)["bf-gov-tb"]]
+        self.assertTrue(apply_sl_rules(t.s(), t.rows(), None)[2].startswith("Rule 3 (mechanism): MET"))
+        self.assertTrue(apply_sl_rules(t.s(), t.rows(), None, prev)[2].startswith("Rule 3 (mechanism): NOT MET"))
+
+    def test_ec_compliance_uses_the_lowest_base_session(self):
+        t = EarlyEditRulesTest()
+        prev = [t.rows(tb_gap=5)["bf-gov-tb"]]
+        self.assertTrue(apply_ec_rules(t.s(), t.rows(), None)[1].startswith("Rule 2 (compliance): MET"))
+        self.assertIn("NOT MET", apply_ec_rules(t.s(), t.rows(), None, prev)[1])

@@ -88,6 +88,19 @@ def model_registry(api_base: str, served_model: str, prefix: str, api_key: str):
     return registry
 
 
+
+def harness_versions() -> dict:
+    """Installed versions of the harness packages (forum 750350: skill packages changed behavior across swegemma)."""
+    from importlib import metadata
+    out = {}
+    for pkg in ("swegemma", "adk-submission", "adk-eval-core", "google-adk", "vllm"):
+        try:
+            out[pkg] = metadata.version(pkg)
+        except metadata.PackageNotFoundError:
+            out[pkg] = None
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--submission", default=ROOT / "submission", type=Path)
@@ -139,6 +152,7 @@ def main() -> None:
             "scorer_faithful": args.served_model.startswith("/") or "gemma-4-31b" in args.served_model,
             "submission_digest": submission_digest(args.submission), "git_commit": git_commit(),
             "ollama_thinking_off": args.ollama_thinking_off, "budgets": b, "compaction": COMPACTION, "task_ids": task_ids,
+            "harness_versions": harness_versions(),
             "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     (results / "run_meta.json").write_text(json.dumps(meta, indent=1))
 

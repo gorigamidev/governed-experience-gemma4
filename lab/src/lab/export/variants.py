@@ -699,6 +699,87 @@ def bf_gov_22(out: Path, base=bf_gov_to) -> None:
     (out / "prompts/system.md").write_text(prompt)
 
 
+def bf_gov_tb_sl(out: Path) -> None:
+    """`bf-gov-tb` with structural slack (doc 03 §14 item 50): a real cap of 32 calls while the prompt keeps saying 28,
+    so an edit that arrives just past the stated budget still lands. Nothing else changes."""
+    bf_gov_tb(out)
+    config = (out / "eval_config.yaml").read_text()
+    config = _replace_once(config, r"^  max_tool_calls: 28\n", "  max_tool_calls: 32\n", "max_tool_calls of bf")
+    (out / "eval_config.yaml").write_text(config)
+
+
+LK_TOOLS = """## Tools
+You have exactly these tools: run_skill_script (skill "repo-tools"), edit_file, write_file, get_status and submit_patch. There is no read_file and no run_command: calling them ends the task with an empty patch.
+
+Every run_skill_script call has three arguments: skill_name is "repo-tools", file_path is "scripts/entrypoint.py" (never a repository file; the repository file or directory goes inside args as "path"), and args is an object. Replace each <...> with a real value:
+
+```
+search:      run_skill_script(skill_name="repo-tools", file_path="scripts/entrypoint.py", args={"search": "<identifier or error text from the issue>"})
+read lines:  run_skill_script(skill_name="repo-tools", file_path="scripts/entrypoint.py", args={"path": "<file.py from a hit>", "start": <line - 20>, "end": <line + 40>})
+list a dir:  run_skill_script(skill_name="repo-tools", file_path="scripts/entrypoint.py", args={"path": "<directory>"})
+run tests:   run_skill_script(skill_name="repo-tools", file_path="scripts/entrypoint.py", args={"cmd": "python -m pytest <tests/test_file.py> -k <name> -q"})
+```
+
+- search: hits are path:line:text. It searches *.py first and every tracked file if that finds nothing. Add "path": "<directory>" to narrow it.
+- read lines: content is the file verbatim (max 150 lines); copy old_string from it.
+- run: runs in the repository root and stops after 90 seconds.
+- If a call returns INVALID_ARGUMENTS or "skill_name is required", do not repeat it: write the next call exactly like the lines above, with skill_name="repo-tools".
+
+"""
+
+LK_BUDGET_OLD = (r"^- Use at most about 10 tool calls to find and read the code\.\n"
+                 r"- By your 12th tool call you must have edited a source file\.[^\n]*\n")
+LK_BUDGET = """- **Read lock**: before your first edit, the look and run actions together allow 10 calls. After that they return `locked` and no new code until you change a source file with `edit_file` or `write_file`. Find the place, read the exact lines and edit within those 10 calls. Your first edit can be a best guess: you can correct it afterwards, because any edit opens the lock for good.
+- If a response says `locked`, your next call must be `edit_file`, with `old_string` copied from `last_read` or from code you already read. While locked, the look action only re-reads lines you already read, plus up to 3 new line ranges of any file you name with `path`, `start` and `end` (to copy an exact `old_string`); no searches, no directory listings and no `run`.
+"""
+
+LK_REMOVED_TOOLS = {"run_command", "read_file", "get_code_neighbors", "search_similar_code", "get_code_subgraph"}
+LK_KEPT_TOOLS = ["edit_file", "write_file", "get_status", "submit_patch"]
+
+
+def bf_gov_tb_lk(out: Path) -> None:
+    """`bf-gov-tb` with a read lock (doc 03 §14 item 54): reading and running go only through the `code` skill, which
+    stops returning new code after 10 calls with no edit. 89 of 133 late first edits in 264 GPU traces already had
+    their `old_string` on screen by call 10. Budget, sampling and thinking are those of `bf-gov-tb`."""
+    bf_gov_tb(out)
+    agent = (out / "agent.yaml").read_text()
+    block = re.search(r"^tools:\n((?:  - [^\n]*\n)+)", agent, re.M)
+    if not block:
+        raise SystemExit("bf-gov-tb-lk: no tools block in agent.yaml; update variants.py")
+    tools = [t.strip()[2:] for t in block.group(1).splitlines()]
+    if set(tools) - set(LK_KEPT_TOOLS) != LK_REMOVED_TOOLS or not set(LK_KEPT_TOOLS) <= set(tools):
+        raise SystemExit(f"bf-gov-tb-lk: unexpected tools {tools}; update variants.py")
+    new_block = "tools:\n" + "".join(f"  - {t}\n" for t in LK_KEPT_TOOLS)
+    agent = agent[:block.start()] + new_block + agent[block.end():]
+    agent = _replace_once(agent, r"^generate_content_config:", lambda m: "skills:\n  - skills/repo-tools\n" + m.group(0),
+                          "generate_content_config of bf")
+    (out / "agent.yaml").write_text(agent)
+    shutil.copytree(ROOT / "lab/src/lab/export/skill_addons/repo-tools", out / "skills/repo-tools",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))
+    p = out / "prompts/system.md"
+    t = p.read_text()
+    t = _replace_once(t, r"^## Workflow\n", lambda m: LK_TOOLS + m.group(0), "Workflow heading of the bf prompt")
+    t = _replace_once(t, r"^- Read only the specific target files and lines using `read_file` or search tools\.",
+                      "- Read only the specific target files and lines with the look action.", "read bullet of step 1")
+    t = _replace_once(t, r"with `git grep -n \"text\" -- '\*\.py' \| head -20`\.",
+                      'with the search call shown under Tools.', "git grep bullet of step 1")
+    t = _replace_once(t, r"^- Do not use `search_similar_code`[^\n]*\n", "", "graph-tools bullet of step 1")
+    t = _replace_once(t, r"re-read the exact lines with `read_file` and copy",
+                      "re-read the exact lines with the look action and copy", "failed-edit rule of bf-gov")
+    t = _replace_once(t, r"run it inline with `run_command` \(`python -c \"\.\.\.\"` or `python - <<'EOF'`\)\.",
+                      'run it inline with the run action (args={"cmd": "python -c \\"...\\""}).', "scratch-file rule of bf-gov")
+    t = _replace_once(t, r"^- Run every `python`, `python -c`, heredoc or `pytest` command with `timeout 90`[^\n]*\n",
+                      "- The run action stops every command after 90 seconds: keep reproductions and tests short and targeted.\n",
+                      "timeout rule of bf-gov-to")
+    t = _replace_once(t, r"find it explicitly with `find tests -name \"\*<name>\*\.py\"`",
+                      'find it explicitly with the run action and `find tests -name "*<name>*.py"`', "find-tests bullet")
+    t = _replace_once(t, LK_BUDGET_OLD, LK_BUDGET, "edit-by-12 rule of the bf budget")
+    for word in ("read_file`", "run_command`", "git grep", "timeout 90"):
+        if word in t.replace("There is no `read_file` and no `run_command`", ""):
+            raise SystemExit(f"bf-gov-tb-lk: prompt still mentions {word}")
+    p.write_text(t)
+
+
 def h24_long(out: Path) -> None:
     """`h24` with a larger per-task budget (doc 03 §14.33): 36 tool calls and 9 minutes instead of 28 and 8. The call
     plan of the prompt (1-8 / 9-12 / 13-20) is unchanged; only the stated limit follows the new budget."""
@@ -742,6 +823,38 @@ def bf_gov_tb_mp_nohab(out: Path) -> None:
     seeds.write_text("")
 
 
+def bf_gov_tb_lk_nt(out: Path) -> None:
+    """Lock probe v4 (doc 03 §14 item 54): bf-gov-tb-lk with thinking off and nothing else. Tests whether the 31B's
+    corrupted skill calls (66% in probe v3, thinking on) come from thinking; v3-v5 runs with thinking off had 0-6%."""
+    bf_gov_tb_lk(out)
+    thinking_off(out)
+
+
+VR_RULE = ("- After your last edit and before `submit_patch`, run the existing test file of the module you changed, "
+           "once: find it with `find tests -name \"test_<module>*.py\"`, then run "
+           "`timeout 90 python -m pytest <that test file> -x -q` (add `-k <name>` when one test covers the change). "
+           "If there is no such file, run `timeout 90 python -c \"...\"` that imports the changed module and calls the "
+           "changed code with the input from the issue. If it fails because of your edit, fix the edit once, then submit.\n")
+
+
+def bf_gov_to_nt(out: Path) -> None:
+    """Doc 03 §14 item 55: `bf-gov-to` with thinking off and nothing else (doc 01 row 32 left thinking off to be
+    revalidated after the 30 Sep scorer; the 31B with thinking off made hundreds of clean tool calls in v4-v5)."""
+    bf_gov_to(out)
+    thinking_off(out)
+
+
+def bf_gov_to_nt_vr(out: Path) -> None:
+    """Doc 03 §14 item 55: `bf-gov-to-nt` plus one rule whose action is visible in the call (run the changed module's
+    existing tests after the last edit). In 48 `bf-gov-to` runs the model ran pytest after its last edit in 3."""
+    bf_gov_to_nt(out)
+    path = out / "prompts/system.md"
+    prompt = _replace_once(path.read_text(), r"^- After your edit: one compile check or one targeted test, a correction if "
+                           r"needed, then `submit_patch`\. (Do not start new exploration after your 20th tool call\.)$",
+                           lambda m: VR_RULE.rstrip("\n") + " " + m.group(1), "the after-edit line of the bf budget section")
+    path.write_text(prompt)
+
+
 VARIANTS = {"b2": lambda out: None, "b1-no-skill": b1_no_skill, "b2-think-off": thinking_off,
             "b1-think-off": b1_think_off, "b2-phases": phases, "b2-no-graph": no_graph,
             "b2-phases-adapter": phases_adapter, "b2-locator-tool": locator_tool, "b2.3": b2_3, "b2-explicit": b2_explicit, "b2-explicit-short": b2_explicit_short,
@@ -755,7 +868,9 @@ VARIANTS = {"b2": lambda out: None, "b1-no-skill": b1_no_skill, "b2-think-off": 
             "bf-gov-ct": bf_gov_ct, "bf-gov-ti": bf_gov_ti, "bf-gov-ec": bf_gov_ec, "bf-gov-22": bf_gov_22,
             **{f"bf-gov-tb-{k}": (lambda f: lambda out: f(out, bf_gov_tb))(f)
                for k, f in (("ct", bf_gov_ct), ("ti", bf_gov_ti), ("ec", bf_gov_ec), ("22", bf_gov_22))},
-            "bf-gov-tb-mp": bf_gov_tb_mp, "bf-gov-tb-mp-nohab": bf_gov_tb_mp_nohab,
+            "bf-gov-tb-mp": bf_gov_tb_mp, "bf-gov-tb-mp-nohab": bf_gov_tb_mp_nohab, "bf-gov-tb-sl": bf_gov_tb_sl,
+            "bf-gov-tb-lk": bf_gov_tb_lk, "bf-gov-tb-lk-nt": bf_gov_tb_lk_nt,
+            "bf-gov-to-nt": bf_gov_to_nt, "bf-gov-to-nt-vr": bf_gov_to_nt_vr,
             "h24": lambda out: None, "h24-long": h24_long}
 SOURCES = {"top": TOP_BUNDLE, "top-check": TOP_BUNDLE, "top-think": TOP_BUNDLE, "top-directed": TOP_BUNDLE,
            "top-mix-1k": TOP_BUNDLE, "top-mix-2k": TOP_BUNDLE,
@@ -763,8 +878,9 @@ SOURCES = {"top": TOP_BUNDLE, "top-check": TOP_BUNDLE, "top-think": TOP_BUNDLE, 
            "bf-habits": BUDGET_FIT, "bf-gov": BUDGET_FIT, "bf-gov-to": BUDGET_FIT, "bf-gov-tb": BUDGET_FIT, "bf-gov-ed": BUDGET_FIT,
            "bf-gov-ct": BUDGET_FIT, "bf-gov-ti": BUDGET_FIT, "bf-gov-ec": BUDGET_FIT, "bf-gov-22": BUDGET_FIT,
            **{f"bf-gov-tb-{k}": BUDGET_FIT for k in ("ct", "ti", "ec", "22")},
-           "bf-gov-tb-mp": BUDGET_FIT, "bf-gov-tb-mp-nohab": BUDGET_FIT,
-           "h24": H24, "h24-long": H24}
+           "bf-gov-tb-mp": BUDGET_FIT, "bf-gov-tb-mp-nohab": BUDGET_FIT, "bf-gov-tb-sl": BUDGET_FIT,
+           "bf-gov-tb-lk": BUDGET_FIT, "bf-gov-tb-lk-nt": BUDGET_FIT,
+           "bf-gov-to-nt": BUDGET_FIT, "bf-gov-to-nt-vr": BUDGET_FIT, "h24": H24, "h24-long": H24}
 
 
 def build_variant(name: str, src: Path | None = None, dest_root: Path = ROOT / "build/variants") -> Path:

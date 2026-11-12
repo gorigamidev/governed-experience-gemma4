@@ -41,6 +41,11 @@ make test
 | Table 2 pools: rules | `python -m lab.analysis.pool_report --arms a=<run>,b=<run>`; mechanisms: `lever_report`, `command_timeouts`, `long_turns`, `edit_deadline` | Pool outputs |
 | §4.2 E4B diagnostic and memory test | `make preflight` with Ollama `gemma4-e4b-32k` (Gemma 4 E4B, `num_ctx` 32768); `python -m lab.analysis.memory_e4b`, `failure_split` | Ollama, Competition Data |
 | §4.2 second-opinion simulation | `python -m lab.analysis.second_opinion_sim` | Two E4B base runs, Competition Data |
+| §4.2 conditional authority (31B and E4B) | phase A: `python -m lab.analysis.authority_split`; phase B: `make preflight` (E4B, base against `bf-gov-tb-mp-nohab`) then `python -m lab.analysis.authority_phase_b --stamp <run>` | Pool traces; Ollama, Competition Data |
+| §4.4 hidden thinking with `enable_thinking: False` | `python -m lab.analysis.hidden_thinking` | Pool outputs |
+| §4.4 repetition inside an episode | `python -m lab.analysis.self_imitation` | Pool outputs |
+| §4.4 where tasks are lost, edits after the warning | `python -m lab.analysis.near_miss`, `refused_edits` | Pool outputs, Docker |
+| §4.4 read lock (archived) | `python -m lab.analysis.lock_sim` (offline), `lock_report` (probe runs) | Pool outputs, Kaggle GPU quota |
 | Table 3 defects | `lab.analysis.graph_coverage`, `make verify-patches`, `lab.analysis.pool_report` (failed-edit split) | Competition Data, Docker |
 
 All commands run from the repository root with `PYTHONPATH=lab/src` (the `Makefile` sets it).

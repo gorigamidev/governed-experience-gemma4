@@ -32,5 +32,16 @@ class OllamaThinkingOffTest(unittest.TestCase):
                 self.assertEqual(agent.model._additional_args.get("reasoning_effort"), effort, name)
 
 
+
+@unittest.skipUnless(HAS_HARNESS, "adk_submission/swegemma not installed")
+class HarnessVersionsTest(unittest.TestCase):
+    def test_versions_recorded_for_the_harness_packages(self):
+        from lab.eval.run_eval import harness_versions
+
+        v = harness_versions()
+        self.assertEqual(set(v), {"swegemma", "adk-submission", "adk-eval-core", "google-adk", "vllm"})
+        self.assertTrue(v["swegemma"])
+
+
 if __name__ == "__main__":
     unittest.main()

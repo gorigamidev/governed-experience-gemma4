@@ -431,6 +431,97 @@ class BfGovLeversTest(unittest.TestCase):
             self.assertIn("after your 16th tool call", "\n".join(after))
 
 
+    def test_bf_gov_tb_sl_changes_only_the_real_cap(self):
+        with tempfile.TemporaryDirectory() as d:
+            tb = build_variant("bf-gov-tb", dest_root=Path(d))
+            sl = build_variant("bf-gov-tb-sl", dest_root=Path(d))
+            for f in ("agent.yaml", "configs/sampling.yaml", "prompts/system.md"):
+                self.assertTrue(filecmp.cmp(tb / f, sl / f, shallow=False), f)
+            self.assertIn("at most 28 tool calls", (sl / "prompts/system.md").read_text())
+            before = (tb / "eval_config.yaml").read_text().splitlines()
+            after = (sl / "eval_config.yaml").read_text().splitlines()
+            self.assertEqual([(a, b) for a, b in zip(before, after) if a != b],
+                             [("  max_tool_calls: 28", "  max_tool_calls: 32")])
+
+    def _changed(self, a: Path, b: Path) -> list[str]:
+        fa = sorted(str(p.relative_to(a)) for p in a.rglob("*") if p.is_file())
+        fb = sorted(str(p.relative_to(b)) for p in b.rglob("*") if p.is_file())
+        self.assertEqual(fa, fb)
+        return [f for f in fa if not filecmp.cmp(a / f, b / f, shallow=False)]
+
+    def test_bf_gov_to_nt_only_turns_thinking_off_and_vr_only_adds_the_rule(self):
+        with tempfile.TemporaryDirectory() as d:
+            to = build_variant("bf-gov-to", dest_root=Path(d))
+            nt = build_variant("bf-gov-to-nt", dest_root=Path(d))
+            vr = build_variant("bf-gov-to-nt-vr", dest_root=Path(d))
+            self.assertEqual(self._changed(to, nt), ["configs/sampling.yaml"])
+            diff = [(x, y) for x, y in zip((to / "configs/sampling.yaml").read_text().splitlines(),
+                                           (nt / "configs/sampling.yaml").read_text().splitlines()) if x != y]
+            self.assertEqual(diff, [("  include_thoughts: true", "  include_thoughts: false")])
+            self.assertEqual(self._changed(nt, vr), ["prompts/system.md"])
+            a = (nt / "prompts/system.md").read_text().splitlines()
+            b = (vr / "prompts/system.md").read_text().splitlines()
+            self.assertEqual(len(a), len(b))
+            changed = [(x, y) for x, y in zip(a, b) if x != y]
+            self.assertEqual(len(changed), 1)
+            self.assertTrue(changed[0][0].startswith("- After your edit: one compile check"))
+            self.assertIn("timeout 90 python -m pytest <that test file> -x -q", changed[0][1])
+            self.assertTrue(changed[0][1].endswith("Do not start new exploration after your 20th tool call."))
+
+    def test_bf_gov_tb_lk_nt_only_turns_thinking_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            lk = build_variant("bf-gov-tb-lk", dest_root=Path(d))
+            nt = build_variant("bf-gov-tb-lk-nt", dest_root=Path(d))
+            a = sorted(str(p.relative_to(lk)) for p in lk.rglob("*") if p.is_file())
+            b = sorted(str(p.relative_to(nt)) for p in nt.rglob("*") if p.is_file())
+            self.assertEqual(a, b)
+            differ = [f for f in a if not filecmp.cmp(lk / f, nt / f, shallow=False)]
+            self.assertEqual(differ, ["configs/sampling.yaml"])
+            before = (lk / "configs/sampling.yaml").read_text().splitlines()
+            after = (nt / "configs/sampling.yaml").read_text().splitlines()
+            self.assertEqual([(x, y) for x, y in zip(before, after) if x != y],
+                             [("  include_thoughts: true", "  include_thoughts: false")])
+
+    def test_bf_gov_tb_lk_swaps_reading_tools_for_the_locked_skill(self):
+        with tempfile.TemporaryDirectory() as d:
+            tb = build_variant("bf-gov-tb", dest_root=Path(d))
+            lk = build_variant("bf-gov-tb-lk", dest_root=Path(d))
+            for f in ("eval_config.yaml", "configs/sampling.yaml"):
+                self.assertTrue(filecmp.cmp(tb / f, lk / f, shallow=False), f)
+            agent = (lk / "agent.yaml").read_text()
+            self.assertIn("tools:\n  - edit_file\n  - write_file\n  - get_status\n  - submit_patch\nskills:\n"
+                          "  - skills/repo-tools\n", agent)
+            for gone in ("read_file", "run_command", "get_code_", "search_similar_code"):
+                self.assertNotIn(gone, agent)
+            files = sorted(str(p.relative_to(lk / "skills/repo-tools")) for p in (lk / "skills/repo-tools").rglob("*") if p.is_file())
+            self.assertEqual(files, ["SKILL.md", "scripts/entrypoint.py", "scripts/lock.py", "scripts/look.py",
+                                     "scripts/run.py"])
+            prompt = (lk / "prompts/system.md").read_text()
+            self.assertIn("**Read lock**", prompt)
+            self.assertNotIn("By your 12th tool call", prompt)
+            self.assertNotIn("timeout 90", prompt)
+            self.assertNotIn("git grep", prompt)
+            self.assertEqual(prompt.count("read_file"), 1)  # only "There is no `read_file`"
+            self.assertEqual(prompt.count("run_command"), 1)
+            self.assertIn("at most 28 tool calls", prompt)
+            skill_md = (lk / "skills/repo-tools/SKILL.md").read_text()
+            for text in (prompt, skill_md):
+                calls = re.findall(r"run_skill_script\((.*)\)", text)  # every example is a full call (E4B copies)
+                self.assertGreaterEqual(len(calls), 4)
+                for c in calls:
+                    self.assertTrue(c.startswith('skill_name="repo-tools", file_path="scripts/entrypoint.py", args={"') and "args=" in c, c)
+                # GPU probe 9 Nov: the 31B closed file_path with a backtick ("scripts/look.py`,skill_name:") in 165
+                # calls, copying `scripts/look.py` from the prose; no script path may touch a backtick
+                self.assertNotRegex(text, r"`[^`\n]*scripts/(look|run)\.py|scripts/(look|run)\.py[^`\n]*`")
+                self.assertNotIn("`run_skill_script(", text)
+                # probe v2: with skill "code" + look.py/run.py the 31B corrupted 22-42% of calls; with mini-palace +
+                # scripts/entrypoint.py, 0 of ~660. The prompt shows only the entrypoint shape
+                # preflight 9 Nov: "is the same three arguments" + "action" in the examples -> E4B made no call (0/3
+                # replays of the same request; 4/4 complete calls without them)
+                for gone in ('skill_name="code"', 'skill "code"', "scripts/look.py", "scripts/run.py", '"action"',
+                             "is the same three arguments"):
+                    self.assertNotIn(gone, text)
+
     def test_levers_on_tb_differ_from_levers_on_to_only_in_the_thinking_budget(self):
         for k in ("ct", "ti", "ec", "22"):
             with self.subTest(k), tempfile.TemporaryDirectory() as d:

@@ -156,7 +156,27 @@ def trace_problems(results: Path, has_skill: bool, require_skill: bool = True) -
             notes.append(f"{iid}: the model did not call the skill")
     if not any(run.tool_calls for run in runs):
         infra.append("arm not exercised: no tool call in any task, so nothing was verified")
-    if require_skill and has_skill and not any(c.ok for run in runs for c in run.skill_calls):
+    code_skill = any((results / f"submission/skills/{n}").is_dir() for n in ("code", "repo-tools"))
+    if code_skill:  # the read-lock skill of bf-gov-tb-lk (doc 03 §14 item 54); load_traces only knows mini-palace
+        from lab.analysis.lock_report import task_metrics
+
+        ok_calls = 0
+        for path in sorted((results / "traces").glob("trace_*.json")):
+            iid = path.stem.removeprefix("trace_")
+            m = task_metrics(json.loads(path.read_text()))
+            ok_calls += m["skill_calls"] - len(m["skill_errors"])
+            ok_calls -= len(m["model_errors"])
+            infra += [f"{iid}: well-formed code-skill call failed -> {err}" for err in m["skill_errors"]]
+            notes += [f"{iid}: malformed code-skill call rejected by ADK ({err})" for err in m["model_errors"]]
+            if m["undeclared"]:
+                notes.append(f"{iid}: undeclared tools called {m['undeclared']} (ends the task in the harness)")
+            if m["activations"]:
+                notes.append(f"{iid}: lock fired {m['activations']}x, edit right after {m['edit_after_lock']}, "
+                             f"first edit at call {m['first_edit_call']}")
+        notes = [n for n in notes if not n.endswith("the model did not call the skill")]
+        if require_skill and not ok_calls:
+            infra.append("code skill not exercised: no successful skill call in any task")
+    elif require_skill and has_skill and not any(c.ok for run in runs for c in run.skill_calls):
         infra.append("skill not exercised: no successful skill call in any task; rerun with more tasks")
     return sorted(set(infra)), notes
 

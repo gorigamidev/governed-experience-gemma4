@@ -8,6 +8,8 @@ Competition Data is not redistributed (competition rules, 2.4.b): no tasks, snap
 repository. Agent traces embed task statements, so the pool results are reproduced by re-running the pools, not from
 shipped traces. The paper reports only aggregates.
 
+**Correction (2026-11-25):** the resolved counts of Table 2 are corrected in [`paper/ERRATA.md`](paper/ERRATA.md).
+
 ## Layout
 
 | Path | What it is |
